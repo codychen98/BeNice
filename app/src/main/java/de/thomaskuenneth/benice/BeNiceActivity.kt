@@ -10,6 +10,7 @@ import android.content.Intent.FLAG_ACTIVITY_NEW_TASK
 import android.content.Intent.FLAG_ACTIVITY_TASK_ON_HOME
 import android.os.Handler
 import android.os.Looper
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.core.net.toUri
 import androidx.lifecycle.lifecycleScope
@@ -17,6 +18,9 @@ import kotlinx.coroutines.launch
 
 const val MIME_TYPE_URL = "text/uri-list"
 const val MIME_TYPE_IMAGE = "image/*"
+
+const val EXTRA_APP_PAIR_TOP = "top"
+const val EXTRA_APP_PAIR_BOTTOM = "bottom"
 
 private const val ACTION_LAUNCH_APP = "de.thomaskuenneth.benice.intent.action.ACTION_LAUNCH_APP"
 private const val PACKAGE_NAME = "packageName"
@@ -30,36 +34,60 @@ private const val CLASS_NAME_FIRST_APP = "classNameFirstApp"
 private const val PACKAGE_NAME_SECOND_APP = "packageNameSecondApp"
 private const val CLASS_NAME_SECOND_APP = "classNameSecondApp"
 
+private data class AppPairLaunch(
+    val firstPackageName: String,
+    val firstClassName: String,
+    val secondPackageName: String,
+    val secondClassName: String,
+    val delay: Long,
+)
+
 class BeNiceActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        if (intent?.action == ACTION_LAUNCH_APP_PAIR) {
-            val firstPackageName = intent.getStringExtra(PACKAGE_NAME_FIRST_APP)
-            val firstClassName = intent.getStringExtra(CLASS_NAME_FIRST_APP)
-            val secondPackageName = intent.getStringExtra(PACKAGE_NAME_SECOND_APP)
-            val secondClassName = intent.getStringExtra(CLASS_NAME_SECOND_APP)
-            val delay = intent.getLongExtra(DELAY, 500L)
-            if (firstPackageName != null && firstClassName != null && secondPackageName != null && secondClassName != null) {
-                launchApp(
-                    packageName = firstPackageName, className = firstClassName, false
-                )
-                Handler(Looper.getMainLooper()).postDelayed({
-                    launchApp(
-                        packageName = secondPackageName, className = secondClassName, true
-                    )
-                    finish()
-                }, delay)
+        when (val appPairLaunch = intent?.resolveAppPairLaunch(this)) {
+            null -> {
+                when {
+                    intent?.hasShellAppPairExtras() == true -> {
+                        Toast.makeText(this, R.string.something_went_wrong, Toast.LENGTH_LONG).show()
+                        finish()
+                    }
+
+                    intent?.action == ACTION_LAUNCH_APP_PAIR -> Unit
+
+                    else -> {
+                        Intent(this, AppChooserActivity::class.java).run {
+                            addFlags(FLAG_ACTIVITY_NEW_TASK)
+                            startActivityCatchExceptions(this)
+                        }
+                        Handler(Looper.getMainLooper()).postDelayed({
+                            launchApp(intent = intent)
+                            finish()
+                        }, 500L)
+                    }
+                }
             }
-        } else {
-            Intent(this, AppChooserActivity::class.java).run {
-                addFlags(FLAG_ACTIVITY_NEW_TASK)
-                startActivityCatchExceptions(this)
-            }
+
+            else -> launchAppPair(appPairLaunch)
+        }
+    }
+
+    private fun launchAppPair(appPairLaunch: AppPairLaunch) {
+        with(appPairLaunch) {
+            launchApp(
+                packageName = firstPackageName,
+                className = firstClassName,
+                launchAdjacent = false,
+            )
             Handler(Looper.getMainLooper()).postDelayed({
-                launchApp(intent = intent)
+                launchApp(
+                    packageName = secondPackageName,
+                    className = secondClassName,
+                    launchAdjacent = true,
+                )
                 finish()
-            }, 500L)
+            }, delay)
         }
     }
 
@@ -76,6 +104,46 @@ class BeNiceActivity : ComponentActivity() {
             }
         }
     }
+}
+
+private fun Intent.hasShellAppPairExtras(): Boolean =
+    getStringExtra(EXTRA_APP_PAIR_TOP) != null && getStringExtra(EXTRA_APP_PAIR_BOTTOM) != null
+
+private fun Intent.resolveAppPairLaunch(context: Context): AppPairLaunch? {
+    val delay = getLongExtra(DELAY, 500L)
+    if (action == ACTION_LAUNCH_APP_PAIR) {
+        val firstPackageName = getStringExtra(PACKAGE_NAME_FIRST_APP)
+        val firstClassName = getStringExtra(CLASS_NAME_FIRST_APP)
+        val secondPackageName = getStringExtra(PACKAGE_NAME_SECOND_APP)
+        val secondClassName = getStringExtra(CLASS_NAME_SECOND_APP)
+        if (firstPackageName != null && firstClassName != null &&
+            secondPackageName != null && secondClassName != null
+        ) {
+            return AppPairLaunch(
+                firstPackageName = firstPackageName,
+                firstClassName = firstClassName,
+                secondPackageName = secondPackageName,
+                secondClassName = secondClassName,
+                delay = delay,
+            )
+        }
+    }
+    val topPackageName = getStringExtra(EXTRA_APP_PAIR_TOP)
+    val bottomPackageName = getStringExtra(EXTRA_APP_PAIR_BOTTOM)
+    if (topPackageName != null && bottomPackageName != null) {
+        val topClassName = context.resolveLauncherClassName(topPackageName)
+        val bottomClassName = context.resolveLauncherClassName(bottomPackageName)
+        if (topClassName != null && bottomClassName != null) {
+            return AppPairLaunch(
+                firstPackageName = topPackageName,
+                firstClassName = topClassName,
+                secondPackageName = bottomPackageName,
+                secondClassName = bottomClassName,
+                delay = delay,
+            )
+        }
+    }
+    return null
 }
 
 fun Activity.launchApp(

@@ -47,4 +47,7 @@ fun String.isValidUrl(): Boolean {
 fun sameApp(app1: AppInfo?, app2: AppInfo?): Boolean =
     (app1?.packageName ?: "") == (app2?.packageName ?: "")
 
+fun Context.resolveLauncherClassName(packageName: String): String? =
+    packageManager.getLaunchIntentForPackage(packageName)?.component?.className
+
 fun String.createLabelFromURL(defaultStr: String): String = this.toUri().host ?: defaultStr
